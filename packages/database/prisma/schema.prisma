@@ -1,0 +1,578 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  REP
+  VIEWER
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+  NURTURING
+  DO_NOT_CONTACT
+}
+
+enum LeadSource {
+  MANUAL
+  SCRAPER
+  APOLLO
+  CLEARBIT
+  GOOGLE_MAPS
+  CSV_IMPORT
+  REFERRAL
+  WEBSITE
+  SOCIAL
+  ENRICHMENT
+}
+
+enum ActivityType {
+  DOOR_KNOCK
+  CALL
+  EMAIL
+  SMS
+  MEETING
+  DEMO
+  FOLLOW_UP
+  NOTE
+  WHATSAPP
+}
+
+enum ActivityOutcome {
+  NO_ANSWER
+  INTERESTED
+  NOT_INTERESTED
+  CALLBACK_REQUESTED
+  DEMO_BOOKED
+  PROPOSAL_SENT
+  CLOSED_WON
+  CLOSED_LOST
+  LEFT_VOICEMAIL
+  SPOKE_TO_GATEKEEPER
+}
+
+enum TerritoryStatus {
+  ACTIVE
+  INACTIVE
+  COMPLETED
+  PAUSED
+}
+
+enum EnrichmentStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum PipelineStage {
+  PROSPECTING
+  QUALIFICATION
+  NEEDS_ANALYSIS
+  VALUE_PROPOSITION
+  DECISION_MAKERS
+  PERCEPTION_ANALYSIS
+  PROPOSAL
+  NEGOTIATION
+  CLOSED_WON
+  CLOSED_LOST
+}
+
+enum NotificationType {
+  LEAD_ASSIGNED
+  ACTIVITY_REMINDER
+  TERRITORY_UPDATE
+  TEAM_MENTION
+  SYSTEM_ALERT
+  ENRICHMENT_COMPLETE
+  AI_SUGGESTION
+}
+
+enum ApiProvider {
+  CLEARBIT
+  HUNTER_IO
+  APOLLO
+  GOOGLE_MAPS
+  GOOGLE_PLACES
+  TWILIO
+  SENDGRID
+  OPENAI
+  MAPBOX
+  OPENSTREETMAP
+  ZAPIER
+  MAKE
+  CUSTOM
+}
+
+enum ApiLogStatus {
+  SUCCESS
+  FAILED
+  RATE_LIMITED
+  TIMEOUT
+  PARTIAL
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model Organization {
+  id             String    @id @default(cuid())
+  name           String
+  slug           String    @unique
+  logo           String?
+  website        String?
+  industry       String?
+  size           String?
+  plan           String    @default("free")
+  planExpiresAt  DateTime?
+  settings       Json      @default("{}")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  users              User[]
+  territories        Territory[]
+  leads              Lead[]
+  companies          Company[]
+  contacts           Contact[]
+  activities         Activity[]
+  scraperJobs        ScraperJob[]
+  analyticsSnapshots AnalyticsSnapshot[]
+  notifications      Notification[]
+  tags               Tag[]
+
+  @@index([slug])
+}
+
+model User {
+  id                String    @id @default(cuid())
+  organizationId    String
+  email             String    @unique
+  password          String
+  firstName         String
+  lastName          String
+  phone             String?
+  avatar            String?
+  role              UserRole  @default(REP)
+  isActive          Boolean   @default(true)
+  isEmailVerified   Boolean   @default(false)
+  lastLoginAt       DateTime?
+  lastLocationLat   Float?
+  lastLocationLng   Float?
+  lastLocationAt    DateTime?
+  fcmToken          String?
+  settings          Json      @default("{}")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  refreshTokens        RefreshToken[]
+  territoryAssignments TerritoryAssignment[]
+  assignedLeads        Lead[]                @relation("AssignedRep")
+  activities           Activity[]
+  repTrackings         RepTracking[]
+  notifications        Notification[]
+  aiInsights           AiInsight[]
+
+  @@index([organizationId])
+  @@index([email])
+  @@index([role])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model Territory {
+  id             String          @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  status         TerritoryStatus @default(ACTIVE)
+  color          String          @default("#3B82F6")
+  boundary       Json?
+  centerLat      Float?
+  centerLng      Float?
+  radiusMeters   Float?
+  zipCodes       String[]
+  city           String?
+  state          String?
+  country        String?
+  totalLeads     Int             @default(0)
+  conversions    Int             @default(0)
+  conversionRate Float           @default(0)
+  avgLeadScore   Float           @default(0)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments  TerritoryAssignment[]
+  leads        Lead[]
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+model TerritoryAssignment {
+  id          String    @id @default(cuid())
+  territoryId String
+  userId      String
+  startDate   DateTime  @default(now())
+  endDate     DateTime?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  territory Territory @relation(fields: [territoryId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([territoryId, userId])
+  @@index([userId])
+  @@index([territoryId])
+}
+
+model Company {
+  id               String           @id @default(cuid())
+  organizationId   String
+  name             String
+  domain           String?
+  website          String?
+  phone            String?
+  email            String?
+  industry         String?
+  employeeCount    Int?
+  revenueEstimate  String?
+  founded          Int?
+  description      String?
+  logoUrl          String?
+  linkedinUrl      String?
+  addressLine1     String?
+  city             String?
+  state            String?
+  zip              String?
+  country          String?
+  lat              Float?
+  lng              Float?
+  enrichmentStatus EnrichmentStatus @default(PENDING)
+  enrichedAt       DateTime?
+  enrichmentData   Json             @default("{}")
+  score            Float            @default(0)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  leads        Lead[]
+  contacts     Contact[]
+
+  @@index([organizationId])
+  @@index([domain])
+  @@index([enrichmentStatus])
+}
+
+model Contact {
+  id               String           @id @default(cuid())
+  organizationId   String
+  companyId        String?
+  firstName        String
+  lastName         String
+  email            String?
+  phone            String?
+  mobile           String?
+  title            String?
+  department       String?
+  linkedinUrl      String?
+  avatarUrl        String?
+  isDecisionMaker  Boolean          @default(false)
+  enrichmentStatus EnrichmentStatus @default(PENDING)
+  enrichedAt       DateTime?
+  enrichmentData   Json             @default("{}")
+  score            Float            @default(0)
+  notes            String?
+  gdprConsent      Boolean          @default(false)
+  optOut           Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  company      Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  leads        Lead[]
+
+  @@index([organizationId])
+  @@index([companyId])
+  @@index([email])
+}
+
+model Lead {
+  id                   String           @id @default(cuid())
+  organizationId       String
+  territoryId          String?
+  companyId            String?
+  contactId            String?
+  assignedRepId        String?
+  title                String?
+  description          String?
+  source               LeadSource       @default(MANUAL)
+  status               LeadStatus       @default(NEW)
+  addressLine1         String?
+  addressLine2         String?
+  city                 String?
+  state                String?
+  zip                  String?
+  country              String?
+  lat                  Float?
+  lng                  Float?
+  placeId              String?
+  businessName         String?
+  businessType         String?
+  businessPhone        String?
+  businessEmail        String?
+  businessWebsite      String?
+  ownerName            String?
+  score                Float            @default(0)
+  priority             Int              @default(0)
+  conversionProbability Float           @default(0)
+  bestTimeToVisit      String?
+  suggestedAction      String?
+  aiNotes              String?
+  enrichmentStatus     EnrichmentStatus @default(PENDING)
+  enrichedAt           DateTime?
+  enrichmentData       Json             @default("{}")
+  pipelineStage        PipelineStage    @default(PROSPECTING)
+  dealValue            Float?
+  expectedCloseDate    DateTime?
+  closedAt             DateTime?
+  closedReason         String?
+  lastContactedAt      DateTime?
+  nextFollowUpAt       DateTime?
+  totalKnocks          Int              @default(0)
+  totalCalls           Int              @default(0)
+  totalEmails          Int              @default(0)
+  isArchived           Boolean          @default(false)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  territory    Territory?        @relation(fields: [territoryId], references: [id], onDelete: SetNull)
+  company      Company?          @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contact      Contact?          @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  assignedRep  User?             @relation("AssignedRep", fields: [assignedRepId], references: [id], onDelete: SetNull)
+  activities   Activity[]
+  aiInsights   AiInsight[]
+  scoreHistory LeadScoreHistory[]
+
+  @@index([organizationId])
+  @@index([territoryId])
+  @@index([assignedRepId])
+  @@index([status])
+  @@index([pipelineStage])
+  @@index([source])
+  @@index([isArchived])
+  @@index([score])
+  @@index([lat, lng])
+}
+
+model Activity {
+  id             String           @id @default(cuid())
+  organizationId String
+  leadId         String
+  userId         String
+  type           ActivityType
+  outcome        ActivityOutcome?
+  subject        String?
+  notes          String?
+  duration       Int?
+  lat            Float?
+  lng            Float?
+  scheduledAt    DateTime?
+  completedAt    DateTime?
+  metadata       Json             @default("{}")
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lead         Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([leadId])
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model RepTracking {
+  id        String   @id @default(cuid())
+  userId    String
+  lat       Float
+  lng       Float
+  accuracy  Float?
+  speed     Float?
+  heading   Float?
+  timestamp DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([timestamp])
+}
+
+model EnrichmentQueue {
+  id          String           @id @default(cuid())
+  entityType  String
+  entityId    String
+  provider    ApiProvider
+  status      EnrichmentStatus @default(PENDING)
+  priority    Int              @default(0)
+  attempts    Int              @default(0)
+  maxAttempts Int              @default(3)
+  lastError   String?
+  result      Json?
+  scheduledAt DateTime         @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([status, scheduledAt])
+  @@index([entityType, entityId])
+  @@index([provider])
+}
+
+model ApiLog {
+  id         String       @id @default(cuid())
+  provider   ApiProvider
+  endpoint   String
+  method     String
+  status     ApiLogStatus
+  statusCode Int?
+  duration   Int?
+  error      String?
+  createdAt  DateTime     @default(now())
+
+  @@index([provider])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ScraperJob {
+  id             String    @id @default(cuid())
+  organizationId String
+  source         String
+  query          String?
+  location       String?
+  radius         Float?
+  status         String    @default("pending")
+  progress       Float     @default(0)
+  totalFound     Int       @default(0)
+  totalImported  Int       @default(0)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+model AnalyticsSnapshot {
+  id             String   @id @default(cuid())
+  organizationId String
+  period         String
+  date           DateTime
+  data           Json
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, period, date])
+  @@index([organizationId, period])
+}
+
+model AiInsight {
+  id         String    @id @default(cuid())
+  leadId     String
+  userId     String?
+  type       String
+  title      String
+  content    String
+  confidence Float     @default(0)
+  isActioned Boolean   @default(false)
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  lead Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([leadId])
+  @@index([isActioned])
+}
+
+model Notification {
+  id             String           @id @default(cuid())
+  organizationId String
+  userId         String
+  type           NotificationType
+  title          String
+  message        String
+  data           Json             @default("{}")
+  isRead         Boolean          @default(false)
+  readAt         DateTime?
+  createdAt      DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([organizationId])
+}
+
+model Tag {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  color          String   @default("#6B7280")
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model LeadScoreHistory {
+  id        String   @id @default(cuid())
+  leadId    String
+  score     Float
+  factors   Json
+  createdAt DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@index([createdAt])
+}
